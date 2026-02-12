@@ -1,0 +1,420 @@
+---
+- name: Collect System Info from Windows hosts
+  hosts: windows
+  gather_facts: no
+  tasks:
+    # -------------------------------------------------
+    # Clean previous text report (on controller)
+    # -------------------------------------------------
+    - name: Ensure previous report is removed from Desktop
+      delegate_to: localhost
+      file:
+        path: "/home/csi/Desktop/report.txt"
+        state: absent
+
+    # -------------------------------------------------
+    # CSV Cleanup & Header (runs once)
+    # -------------------------------------------------
+    - name: Ensure clean multi-host CSV file
+      delegate_to: localhost
+      file:
+        path: "/home/csi/Desktop/windows_report_multi.csv"
+        state: absent
+      run_once: true
+
+    - name: Write CSV header (only once)
+      delegate_to: localhost
+      copy:
+        dest: "/home/csi/Desktop/windows_report_multi.csv"
+        content: |
+          "Report Generated On","Detection Method","Network Adapter MAC Address","Network Adapter IP Address","Hostname","Inventory Name","Network Adapter Name","Network Adapter Description","Network Adapter Status","Network Adapter Subnet Mask","Network Adapter Default Gateway","Network Adapter DNS Servers","BIOS Serial Number","BIOS Version","Disk Model/Serial/Size","Installed OS","OS Version","OS Install Date","Administrator Account Status","Domain Join Status","Firewall Authentication Status","Browser Authentication Status","Windows Time Service Status","USB Device Name","Facebook Connectivity Status","Reddit Connectivity Status","Instagram Connectivity Status","LinkedIn Connectivity Status","WhatsApp Web Connectivity Status","Twitter/X Connectivity Status","Pinterest Connectivity Status","TikTok Connectivity Status","Snapchat Connectivity Status","YouTube Connectivity Status"
+        mode: '0644'
+      run_once: true
+
+    # -------------------------------------------------
+    # Report Header + WMIC Detection + HOSTNAME
+    # -------------------------------------------------
+    - name: Capture system report header, WMIC detection and hostname
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "===================================================================="
+        $output += " SYSTEM INFORMATION REPORT"
+        $output += "===================================================================="
+        $output += ("Generated on: {0} at {1}" -f (Get-Date -Format "MM/dd/yyyy"), (Get-Date -Format "HH:mm:ss.ff"))
+        $output += "===================================================================="
+        $output += ""
+
+        $hostname = $env:COMPUTERNAME
+        if (-not $hostname) { $hostname = "N/A" }
+        $output += "Computer Name (Hostname) : $hostname"
+        $output += ""
+
+        $USE_WMIC = 0
+        try { wmic bios get serialnumber | Out-Null; $USE_WMIC = 1 } catch { }
+        if ($USE_WMIC -eq 1) {
+            $output += "[Detection: Using WMIC - Legacy Mode for compatibility]"
+        } else {
+            $output += "[Detection: Using PowerShell - Modern Mode]"
+        }
+        $output += ""
+        $output
+      register: system_report
+      ignore_errors: yes   # ← prevent full failure if weird env
+
+    # -------------------------------------------------
+    # [1] BIOS SERIAL NUMBER
+    # -------------------------------------------------
+    - name: Collect BIOS Serial Number
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[1] BIOS SERIAL NUMBER"
+        $output += "----------------------------------------------------------------"
+        try {
+          $sn = (Get-CimInstance Win32_BIOS -ErrorAction Stop).SerialNumber
+          $output += if ($sn) { $sn } else { "N/A" }
+        } catch {
+          try {
+            $lines = wmic bios get serialnumber
+            foreach ($line in $lines) {
+              $line = $line.Trim()
+              if ($line -and $line -ne "SerialNumber") {
+                $output += $line
+                break
+              }
+            }
+          } catch {
+            $output += "N/A (failed to retrieve)"
+          }
+        }
+        $output += ""
+        $output
+      register: bios_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [2] DISK DRIVE INFORMATION (first disk only for CSV simplicity)
+    # -------------------------------------------------
+    - name: Collect Disk Drive Information
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[2] DISK DRIVE INFORMATION"
+        $output += "----------------------------------------------------------------"
+        $firstDiskModel   = "N/A"
+        $firstDiskSerial  = "N/A"
+        $firstDiskSizeGB  = "N/A"
+
+        try {
+          $disks = Get-PhysicalDisk -ErrorAction Stop | Where-Object { $_.MediaType -eq "HDD" -or $_.MediaType -eq "SSD" }
+          if ($disks) {
+            $d = $disks[0]
+            $firstDiskModel  = if ($d.Model)  { $d.Model } else { "N/A" }
+            $firstDiskSerial = if ($d.SerialNumber) { $d.SerialNumber } else { "N/A" }
+            $firstDiskSizeGB = if ($d.Size) { [math]::Round($d.Size / 1GB, 0) } else { "N/A" }
+
+            foreach ($d in $disks) {
+              $model  = if ($d.Model)  { $d.Model } else { "N/A" }
+              $serial = if ($d.SerialNumber) { $d.SerialNumber } else { "N/A" }
+              $size   = if ($d.Size) { [math]::Round($d.Size / 1GB, 0) } else { "N/A" }
+              $output += "Model: $model"
+              $output += "Serial Number: $serial"
+              $output += "Size: $size GB"
+              $output += "----------------------------------------------------------------"
+            }
+          } else {
+            $output += "No physical disks found"
+          }
+        } catch {
+          $output += "Error retrieving disk info"
+        }
+        $output += ""
+        $output
+      register: disk_report
+      vars:
+        first_disk_model:   "{{ disk_report.stdout | regex_search('Model: (.*)', '\\1') | first | default('N/A') | trim }}"
+        first_disk_serial:  "{{ disk_report.stdout | regex_search('Serial Number: (.*)', '\\1') | first | default('N/A') | trim }}"
+        first_disk_size:    "{{ disk_report.stdout | regex_search('Size: (\\d+) GB', '\\1') | first | default('N/A') | trim }}"
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [3] OPERATING SYSTEM INFORMATION
+    # -------------------------------------------------
+    - name: Collect Operating System Information
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[3] OPERATING SYSTEM INFORMATION"
+        $output += "----------------------------------------------------------------"
+        try {
+          $sys = systeminfo
+          function Get-Line($label) {
+            $l = $sys | Select-String "^$label"
+            if ($l) { return $l.Line.Split(":",2)[1].Trim() } else { return "N/A" }
+          }
+          $output += "Installed OS: $(Get-Line 'OS Name')"
+          $output += "OS Version: $(Get-Line 'OS Version')"
+          $output += "OS Install Date: $(Get-Line 'Original Install Date')"
+          $output += "BIOS Version: $(Get-Line 'BIOS Version')"
+        } catch {
+          $output += "Error retrieving OS info via systeminfo"
+        }
+        $output += ""
+        $output
+      register: os_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [4] ADMINISTRATOR ACCOUNT STATUS
+    # -------------------------------------------------
+    - name: Check Administrator Account Status
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[4] ADMINISTRATOR ACCOUNT STATUS"
+        $output += "----------------------------------------------------------------"
+        try {
+          $adminCheck = net user administrator 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $statusLine = $adminCheck | Select-String "Account active"
+            if ($statusLine) {
+              $status = ($statusLine.Line -split "\s+")[-1]
+              $output += "Administrator Account: $($status.ToUpper())"
+            } else {
+              $output += "Administrator Account: Status not found"
+            }
+          } else {
+            $output += "Administrator Account: User not found or access denied"
+          }
+        } catch {
+          $output += "Error checking admin account"
+        }
+        $output += ""
+        $output
+      register: admin_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [5] ACTIVE DIRECTORY & GROUP POLICY STATUS
+    # -------------------------------------------------
+    - name: Collect Active Directory & Group Policy Status
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[5] ACTIVE DIRECTORY AND GROUP POLICY STATUS"
+        $output += "----------------------------------------------------------------"
+        $partOfDomain = $false
+        try { $partOfDomain = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).PartOfDomain } catch {}
+        if ($partOfDomain) {
+          $output += "[OK] Domain Join: Machine is domain-joined"
+          # ... (rest unchanged, already has try/catch)
+        } else {
+          $output += "[XX] Domain Join: Machine is NOT domain-joined"
+        }
+        $output += ""
+        $output
+      register: adgp_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [6] FIREWALL AUTHENTICATION STATUS
+    # -------------------------------------------------
+    - name: Collect Firewall / Browser Authentication Status
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[6] FIREWALL AUTHENTICATION STATUS"
+        $output += "----------------------------------------------------------------"
+        $fwResult = 2
+        try {
+          $resp = Invoke-WebRequest 'https://www.google.com' -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
+          if ($resp.StatusCode -eq 407) { $fwResult = 1 } else { $fwResult = 0 }
+        } catch {
+          $fwResult = 2
+        }
+        switch ($fwResult) {
+          0 { $output += "[XX] Firewall Authentication: NOT ACTIVE`nBrowser authentication not required yet (direct access allowed)" }
+          1 { $output += "[OK] Firewall Authentication: ACTIVE`nBrowser-authenticated internet access is required and enforced" }
+          2 { $output += "[XX] Firewall Authentication: FAILED`nInternet access blocked or firewall is enforcing a strict policy" }
+        }
+        $output += ""
+        $output
+      register: fw_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [7] SOCIAL MEDIA CONNECTIVITY (simplified status for CSV)
+    # -------------------------------------------------
+    - name: Collect Social Media Connectivity Status
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[7] SOCIAL MEDIA WEBSITES CONNECTIVITY CHECK"
+        $output += "----------------------------------------------------------------"
+        $accessible = @()
+        $sites = @{
+          "Facebook" = "https://www.facebook.com"
+          "Reddit" = "https://www.reddit.com"
+          "Instagram" = "https://www.instagram.com"
+          "LinkedIn" = "https://www.linkedin.com"
+          "WhatsApp Web" = "https://web.whatsapp.com"
+          "Twitter/X" = "https://www.twitter.com"
+          "Pinterest" = "https://www.pinterest.com"
+          "TikTok" = "https://www.tiktok.com"
+          "Snapchat" = "https://www.snapchat.com"
+          "YouTube" = "https://www.youtube.com"
+        }
+        foreach ($site in $sites.GetEnumerator()) {
+          $status = "NOT Accessible"
+          try {
+            Invoke-WebRequest $site.Value -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop | Out-Null
+            $status = "Accessible"
+          } catch {}
+          $output += "[$status] $($site.Key)"
+          if ($status -eq "Accessible") { $accessible += $site.Key }
+        }
+        $output += ""
+        $output
+      register: social_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [8] USB STORAGE DEVICES HISTORY (first for CSV)
+    # -------------------------------------------------
+    - name: Collect USB Storage Devices History
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[8] USB STORAGE DEVICES HISTORY"
+        $output += "----------------------------------------------------------------"
+        $firstUSB = "None"
+        try {
+          $usbDevices = Get-ChildItem -Path "HKLM:\SYSTEM\CurrentControlSet\Enum\USBSTOR" -Recurse -ErrorAction SilentlyContinue |
+                        Get-ItemProperty -Name FriendlyName -ErrorAction SilentlyContinue |
+                        Select-Object -ExpandProperty FriendlyName -Unique
+          if ($usbDevices) {
+            $firstUSB = $usbDevices[0]
+            foreach ($device in $usbDevices) {
+              $output += "- $device"
+            }
+          } else {
+            $output += "No USB storage devices found"
+          }
+        } catch {
+          $output += "Access denied or registry key not available"
+        }
+        $output += ""
+        $output
+      register: usb_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [9] WINDOWS TIME SERVICE STATUS
+    # -------------------------------------------------
+    - name: Collect Windows Time Service Status
+      ansible.windows.win_shell: |
+        $output = @()
+        $output += "[9] WINDOWS TIME SERVICE STATUS"
+        $output += "----------------------------------------------------------------"
+        $statusText = "NOT RUNNING or NOT CONFIGURED"
+        try {
+          $status = w32tm /query /status 2>$null
+          if ($LASTEXITCODE -eq 0) { $statusText = "RUNNING and Active" }
+        } catch {}
+        $output += "Windows Time Service: $statusText"
+        $output += ""
+        $output
+      register: time_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # [10] NETWORK CONFIGURATION (first physical adapter only for CSV)
+    # -------------------------------------------------
+    - name: Collect Network Configuration - IPv4 Address
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'SilentlyContinue'
+        $output = [System.Collections.ArrayList]::new()
+        function Convert-PrefixToMask {
+          param([int]$PrefixLength)
+          if ($PrefixLength -lt 0 -or $PrefixLength -gt 32) { return "???" }
+          $mask = [uint32]::MaxValue -shl (32 - $PrefixLength) -band [uint32]::MaxValue
+          $bytes = [BitConverter]::GetBytes($mask)
+          ($bytes[3..0] | ForEach-Object { $_ }) -join '.'
+        }
+        $null = $output.Add("[10] NETWORK CONFIGURATION - IPv4 ADDRESS")
+        $null = $output.Add("----------------------------------------------------------------")
+        $null = $output.Add("Physical Network Adapters (Ethernet and Wi-Fi only)")
+        $null = $output.Add("")
+
+        $physicalAdapters = Get-NetAdapter -Physical |
+          Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch '(?i)(VMware|VirtualBox|Hyper-V|Virtual|Loopback|Pseudo|TAP|TUN|VPN|6to4|ISATAP|Teredo|NDIS|Wi-Fi Direct|Hosted|Bluetooth|Microsoft Wi-Fi|WFP)' } |
+          Sort-Object Name
+
+        if (-not $physicalAdapters) {
+          $null = $output.Add(" → No physical Ethernet or Wi-Fi adapters found in 'Up' state.")
+        } else {
+          foreach ($adapter in $physicalAdapters) {
+            $ifIndex = $adapter.ifIndex
+            $config = Get-NetIPConfiguration -InterfaceIndex $ifIndex
+            $null = $output.Add("Adapter : $($adapter.Name)")
+            $null = $output.Add("Description : $($adapter.InterfaceDescription)")
+            $null = $output.Add("Status : $($adapter.Status)")
+            $mac = if ($adapter.MacAddress) { ($adapter.MacAddress -replace ':','-').ToUpper() } else { "N/A" }
+            $null = $output.Add("MAC Address : $mac")
+
+            $ipv4Info = @()
+            $netIP = Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -AddressState Preferred |
+                     Where-Object { $_.IPAddress -notlike "169.254.*" }
+            foreach ($entry in $netIP) {
+              $mask = Convert-PrefixToMask -PrefixLength $entry.PrefixLength
+              $ipv4Info += [PSCustomObject]@{ IP = $entry.IPAddress; Mask = $mask; CIDR = "/$($entry.PrefixLength)" }
+            }
+            if (-not $ipv4Info) {
+              $null = $output.Add("IPv4 : Not configured")
+            } else {
+              foreach ($info in $ipv4Info) {
+                $null = $output.Add("IPv4 : $($info.IP)$($info.CIDR)")
+                $null = $output.Add("Subnet Mask : $($info.Mask)")
+              }
+            }
+            if ($config.IPv4DefaultGateway -and $config.IPv4DefaultGateway.NextHop) {
+              $null = $output.Add("Default Gateway : $($config.IPv4DefaultGateway.NextHop)")
+            }
+            $dns = (Get-DnsClientServerAddress -InterfaceIndex $ifIndex -AddressFamily IPv4).ServerAddresses
+            if ($dns) { $null = $output.Add("DNS Servers : $($dns -join ', ')") }
+            $null = $output.Add("")
+          }
+        }
+        $null = $output.Add("====================================================================")
+        $null = $output.Add(" REPORT COMPLETED ")
+        $null = $output.Add("====================================================================")
+        $output -join "`n"
+      register: net_report
+      ignore_errors: yes
+
+    # -------------------------------------------------
+    # Write final text report (human readable)
+    # -------------------------------------------------
+    # - name: Write final system report to controller Desktop
+    #   delegate_to: localhost
+    #   copy:
+    #     dest: "/home/csi/Desktop/report.txt"
+    #     content: |
+    #       {{ system_report.stdout | default('') }}
+    #       {{ bios_report.stdout | default('') }}
+    #       {{ disk_report.stdout | default('') }}
+    #       {{ os_report.stdout | default('') }}
+    #       {{ admin_report.stdout | default('') }}
+    #       {{ adgp_report.stdout | default('') }}
+    #       {{ fw_report.stdout | default('') }}
+    #       {{ social_report.stdout | default('') }}
+    #       {{ usb_report.stdout | default('') }}
+    #       {{ time_report.stdout | default('') }}
+    #       {{ net_report.stdout | default('') }}
+    #     mode: '0644'
+
+    # -------------------------------------------------
+    # Append one row per host to CSV – no blank lines
+    # -------------------------------------------------
+    - name: Append one clean row per host to CSV
+      delegate_to: localhost
+      ansible.builtin.lineinfile:
+        path: "/home/csi/Desktop/windows_report_multi.csv"
+        line: "{{ lookup('template', 'host_report_row.csv.j2') | trim }}"
+        insertafter: EOF
+        create: yes
+        mode: '0644'
+        state: present
+      throttle: 1
