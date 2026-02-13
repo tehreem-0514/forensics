@@ -13,22 +13,13 @@
         state: absent
 
     # -------------------------------------------------
-    # CSV Cleanup & Header (runs once)
+    # CSV Cleanup (runs once)
     # -------------------------------------------------
-    - name: Ensure clean multi-host CSV file
+    - name: Ensure clean report CSV file
       delegate_to: localhost
       file:
-        path: "/home/csi/Desktop/windows_report_multi.csv"
+        path: "/home/csi/Desktop/report.csv"
         state: absent
-      run_once: true
-
-    - name: Write CSV header (only once)
-      delegate_to: localhost
-      copy:
-        dest: "/home/csi/Desktop/windows_report_multi.csv"
-        content: |
-          "Report Generated On","Detection Method","Network Adapter MAC Address","Network Adapter IP Address","Hostname","Inventory Name","Network Adapter Name","Network Adapter Description","Network Adapter Status","Network Adapter Subnet Mask","Network Adapter Default Gateway","Network Adapter DNS Servers","BIOS Serial Number","BIOS Version","Disk Model/Serial/Size","Installed OS","OS Version","OS Install Date","Administrator Account Status","Domain Join Status","Firewall Authentication Status","Browser Authentication Status","Windows Time Service Status","USB Device Name","Facebook Connectivity Status","Reddit Connectivity Status","Instagram Connectivity Status","LinkedIn Connectivity Status","WhatsApp Web Connectivity Status","Twitter/X Connectivity Status","Pinterest Connectivity Status","TikTok Connectivity Status","Snapchat Connectivity Status","YouTube Connectivity Status"
-        mode: '0644'
       run_once: true
 
     # -------------------------------------------------
@@ -406,15 +397,83 @@
     #     mode: '0644'
 
     # -------------------------------------------------
-    # Append one row per host to CSV – no blank lines
+    # Create single transposed CSV with fields in rows, hosts in columns
     # -------------------------------------------------
-    - name: Append one clean row per host to CSV
+    - name: Create single report.csv with all hosts
       delegate_to: localhost
-      ansible.builtin.lineinfile:
-        path: "/home/csi/Desktop/windows_report_multi.csv"
-        line: "{{ lookup('template', 'host_report_row.csv.j2') | trim }}"
-        insertafter: EOF
-        create: yes
+      run_once: true
+      copy:
+        dest: "/home/csi/Desktop/report.csv"
+        content: |
+          {% set all_hosts = ansible_play_hosts_all -%}
+          "",{% for h in all_hosts %}"{{ h }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Generated On",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ (hr.system_report.stdout | default('') | regex_findall('Generated on: ([\d/]+) at ([\d:.]+)') | first | join(' at ') | default('N/A')) | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Detection Method",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.system_report.stdout | default('') | regex_findall('\[Detection: (.+?)\]') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "MAC Address",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('MAC Address : ([0-9A-F-]+)') | first | default('N/A') | trim }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "IP Address",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('IPv4 : ([\d.]+/\d+)') | first | default('N/A') | trim }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Hostname",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.system_report.stdout | default('') | regex_findall('Computer Name \(Hostname\) : (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Inventory Name",{% for h in all_hosts %}"{{ h }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Network Adapter Name",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('Adapter : (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Network Adapter Description",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('Description : (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Network Adapter Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('Status : (Up|Down|Unknown)') | first | default('N/A') | trim }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Network Adapter Subnet Mask",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('Subnet Mask : ([\d.]+)') | first | default('N/A') | trim }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Network Adapter Default Gateway",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('Default Gateway : ([\d.]+)') | first | default('N/A') | trim }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Network Adapter DNS Servers",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.net_report.stdout | default('') | regex_findall('DNS Servers : (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "BIOS Serial Number",{% for h in all_hosts %}{% set hr = hostvars[h] %}{% set bioslines = hr.bios_report.stdout | default('') | regex_findall('\\[1\\] BIOS SERIAL NUMBER\\s*\\r?\\n-+\\s*\\r?\\n(.+?)(?:\\r?\\n|$)', multiline=True) %}"{{ bioslines | first | default('N/A') | trim }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "BIOS Version",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.os_report.stdout | default('') | regex_findall('BIOS Version: (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Disk Model/Serial/Size",{% for h in all_hosts %}{% set hr = hostvars[h] %}{% set disks = hr.disk_report.stdout | default('') | regex_findall('Model: (.+?)\r?\nSerial Number: (.+?)\r?\nSize: (\d+) GB') %}"{{ disks | map('map','trim') | map('join',' / ') | join('; ') | replace('"', '') if disks else 'N/A' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Installed OS",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.os_report.stdout | default('') | regex_findall('Installed OS: (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "OS Version",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.os_report.stdout | default('') | regex_findall('OS Version: (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "OS Install Date",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.os_report.stdout | default('') | regex_findall('OS Install Date: (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Administrator Account Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.admin_report.stdout | default('') | regex_findall('Administrator Account: (.+?)(?:\r?\n|$)') | first | default('N/A') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Domain Join Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ hr.adgp_report.stdout | default('') | regex_findall('Domain Join: (.+?)(?:\r?\n|$)') | first | default('NOT domain-joined') | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Firewall Authentication Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'ACTIVE' if '[OK] Firewall Authentication: ACTIVE' in hr.fw_report.stdout | default('') else 'NOT ACTIVE' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Browser Authentication Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Required' if '[OK] Firewall Authentication: ACTIVE' in hr.fw_report.stdout | default('') else 'Not Required' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Windows Time Service Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'RUNNING' if 'RUNNING and Active' in hr.time_report.stdout | default('') else 'NOT RUNNING' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "USB Device Name",{% for h in all_hosts %}{% set hr = hostvars[h] %}{% set usbs = hr.usb_report.stdout | default('') | regex_findall('^- (.+)$', multiline=True) | map('trim') | reject('equalto','') | list %}"{{ usbs | join('; ') | replace('"', '') if usbs | length > 0 else 'None' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Facebook Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] Facebook' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Reddit Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] Reddit' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Instagram Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] Instagram' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "LinkedIn Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] LinkedIn' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "WhatsApp Web Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] WhatsApp Web' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Twitter/X Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] Twitter/X' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Pinterest Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] Pinterest' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "TikTok Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] TikTok' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "Snapchat Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] Snapchat' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
+          "YouTube Connectivity Status",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ 'Accessible' if 'Accessible] YouTube' in hr.social_report.stdout | default('') else 'NOT Accessible' }}"{% if not loop.last %},{% endif %}{% endfor %}
+
         mode: '0644'
-        state: present
-      throttle: 1
