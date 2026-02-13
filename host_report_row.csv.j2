@@ -1,1 +1,35 @@
-"{{ (system_report.stdout | regex_findall('Generated on: ([\\d/]+) at ([\\d:.]+)') | first | join(' at ') | default('N/A')) | trim }}","{{ system_report.stdout | regex_findall('\\[Detection: (.*?)\\]') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('MAC Address : ([0-9A-F-]+)') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('IPv4 : ([\\d.]+/\\d+)') | first | default('N/A') | trim }}","{{ system_report.stdout | regex_findall('Computer Name \\(Hostname\\) : (.*)') | first | default('N/A') | trim }}","{{ inventory_hostname | trim }}","{{ net_report.stdout | regex_findall('Adapter : (.*)') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('Description : (.*)') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('Status : (Up|Down|Unknown)') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('Subnet Mask : ([\\d.]+)') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('Default Gateway : ([\\d.]+)') | first | default('N/A') | trim }}","{{ net_report.stdout | regex_findall('DNS Servers : (.*)') | first | default('N/A') | trim }}","{{ bios_report.stdout.split('\n')[2] | default('N/A') | trim }}","{{ os_report.stdout | regex_findall('BIOS Version: (.*)') | first | default('N/A') | trim }}","{% set disks = disk_report.stdout | regex_findall('Model: (.*?)\\r?\\nSerial Number: (.*?)\\r?\\nSize: (\\d+) GB') %}{{ disks | map('map','trim') | map('join',' / ') | join(', ') if disks else 'N/A' }}","{{ os_report.stdout | regex_findall('Installed OS: (.*)') | first | default('N/A') | trim }}","{{ os_report.stdout | regex_findall('OS Version: (.*)') | first | default('N/A') | trim }}","{{ os_report.stdout | regex_findall('OS Install Date: (.*)') | first | default('N/A') | trim }}","{{ admin_report.stdout | regex_findall('Administrator Account: (.*)') | first | default('N/A') | trim }}","{{ adgp_report.stdout | regex_findall('Domain Join: (.*)') | first | default('NOT domain-joined') | trim }}","{{ 'ACTIVE' if '[OK] Firewall Authentication: ACTIVE' in fw_report.stdout else 'NOT ACTIVE' }}","{{ 'Required' if '[OK] Firewall Authentication: ACTIVE' in fw_report.stdout else 'Not Required' }}","{{ 'RUNNING' if 'RUNNING and Active' in time_report.stdout else 'NOT RUNNING' }}","{% set usbs = usb_report.stdout | regex_findall('^- (.+)$', multiline=True) | map('trim') | reject('equalto','') | list %}{{ usbs | join(', ') if usbs | length > 0 else 'None' }}","{{ 'Accessible' if 'Facebook' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'Reddit' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'Instagram' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'LinkedIn' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'WhatsApp Web' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'Twitter/X' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'Pinterest' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'TikTok' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'Snapchat' in social_report.stdout else 'NOT Accessible' }}","{{ 'Accessible' if 'YouTube' in social_report.stdout else 'NOT Accessible' }}"
+content: |
+  Generated On | {{ (system_report.stdout | regex_findall('Generated on: ([\\d/]+) at ([\\d:.]+)') | first | join(' at ') | default('N/A')) | trim }}
+  Detection Method | {{ system_report.stdout | regex_findall('\\[Detection: (.*?)\\]') | first | default('N/A') | trim }}
+  MAC | {{ net_report.stdout | regex_findall('MAC Address : ([0-9A-F-]+)') | first | default('N/A') | trim }}
+  IPAddress | {{ net_report.stdout | regex_findall('IPv4 : ([\\d.]+/\\d+)') | first | default('N/A') | trim }}
+  Hostname | {{ system_report.stdout | regex_findall('Computer Name \\(Hostname\\) : (.*)') | first | default('N/A') | trim }}
+  Inventory Name | {{ inventory_hostname | trim }}
+  Adapter | {{ net_report.stdout | regex_findall('Adapter : (.*)') | first | default('N/A') | trim }}
+  Adapter Desc | {{ net_report.stdout | regex_findall('Description : (.*)') | first | default('N/A') | trim }}
+  Adapter Status | {{ net_report.stdout | regex_findall('Status : (Up|Down|Unknown)') | first | default('N/A') | trim }}
+  Subnet Mask | {{ net_report.stdout | regex_findall('Subnet Mask : ([\\d.]+)') | first | default('N/A') | trim }}
+  Default Gateway | {{ net_report.stdout | regex_findall('Default Gateway : ([\\d.]+)') | first | default('N/A') | trim }}
+  DNS Servers | {{ net_report.stdout | regex_findall('DNS Servers : (.*)') | first | default('N/A') | trim }}
+  BIOS Serial | {{ bios_report.stdout.split('\n')[2] | default('N/A') | trim }}
+  BIOS Version | {{ os_report.stdout | regex_findall('BIOS Version: (.*)') | first | default('N/A') | trim }}
+  Disk model/serial/size | {% set disks = disk_report.stdout | regex_findall('Model: (.*?)\\r?\\nSerial Number: (.*?)\\r?\\nSize: (\\d+) GB') %}{{ disks | map('map','trim') | map('join',' / ') | join(', ') if disks else 'N/A' }}
+  OS | {{ os_report.stdout | regex_findall('Installed OS: (.*)') | first | default('N/A') | trim }}
+  OS Version | {{ os_report.stdout | regex_findall('OS Version: (.*)') | first | default('N/A') | trim }}
+  OS InstallDate | {{ os_report.stdout | regex_findall('OS Install Date: (.*)') | first | default('N/A') | trim }}
+  Admin Status | {{ admin_report.stdout | regex_findall('Administrator Account: (.*)') | first | default('N/A') | trim }}
+  Domain Status | {{ adgp_report.stdout | regex_findall('Domain Join: (.*)') | first | default('NOT domain-joined') | trim }}
+  Firewall Auth | {{ 'ACTIVE' if '[OK] Firewall Authentication: ACTIVE' in fw_report.stdout else 'NOT ACTIVE' }}
+  Browser Auth | {{ 'Required' if '[OK] Firewall Authentication: ACTIVE' in fw_report.stdout else 'Not Required' }}
+  Time Service | {{ 'RUNNING' if 'RUNNING and Active' in time_report.stdout else 'NOT RUNNING' }}
+  USB Device | {% set usbs = usb_report.stdout | regex_findall('^- (.+)$', multiline=True) | map('trim') | reject('equalto','') | list %}{{ usbs | join(', ') if usbs | length > 0 else 'None' }}
+  Facebook Status | {{ 'Accessible' if 'Facebook' in social_report.stdout else 'NOT Accessible' }}
+  Reddit Status | {{ 'Accessible' if 'Reddit' in social_report.stdout else 'NOT Accessible' }}
+  Instagram Status | {{ 'Accessible' if 'Instagram' in social_report.stdout else 'NOT Accessible' }}
+  LinkedIn Status | {{ 'Accessible' if 'LinkedIn' in social_report.stdout else 'NOT Accessible' }}
+  WhatsAppWeb Status | {{ 'Accessible' if 'WhatsApp Web' in social_report.stdout else 'NOT Accessible' }}
+  Twitter Status | {{ 'Accessible' if 'Twitter/X' in social_report.stdout else 'NOT Accessible' }}
+  Pinterest Status | {{ 'Accessible' if 'Pinterest' in social_report.stdout else 'NOT Accessible' }}
+  TikTok Status | {{ 'Accessible' if 'TikTok' in social_report.stdout else 'NOT Accessible' }}
+  Snapchat Status | {{ 'Accessible' if 'Snapchat' in social_report.stdout else 'NOT Accessible' }}
+  YouTube Status | {{ 'Accessible' if 'YouTube' in social_report.stdout else 'NOT Accessible' }}
