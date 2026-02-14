@@ -50,7 +50,11 @@
         $output += ""
         $output
       register: system_report
-      ignore_errors: yes   # ← prevent full failure if weird env
+      ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: system_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [1] BIOS SERIAL NUMBER
@@ -81,6 +85,10 @@
         $output
       register: bios_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: bios_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [2] DISK DRIVE INFORMATION (first disk only for CSV simplicity)
@@ -125,6 +133,10 @@
         first_disk_serial:  "{{ disk_report.stdout | regex_search('Serial Number: (.*)', '\\1') | first | default('N/A') | trim }}"
         first_disk_size:    "{{ disk_report.stdout | regex_search('Size: (\\d+) GB', '\\1') | first | default('N/A') | trim }}"
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: disk_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [3] OPERATING SYSTEM INFORMATION
@@ -151,6 +163,10 @@
         $output
       register: os_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: os_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [4] ADMINISTRATOR ACCOUNT STATUS
@@ -180,6 +196,10 @@
         $output
       register: admin_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: admin_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [5] ACTIVE DIRECTORY & GROUP POLICY STATUS
@@ -201,6 +221,10 @@
         $output
       register: adgp_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: adgp_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [6] FIREWALL AUTHENTICATION STATUS
@@ -226,6 +250,10 @@
         $output
       register: fw_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: fw_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [7] SOCIAL MEDIA CONNECTIVITY (simplified status for CSV)
@@ -261,6 +289,10 @@
         $output
       register: social_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: social_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [8] USB STORAGE DEVICES HISTORY (first for CSV)
@@ -290,6 +322,10 @@
         $output
       register: usb_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: usb_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [9] WINDOWS TIME SERVICE STATUS
@@ -309,6 +345,10 @@
         $output
       register: time_report
       ignore_errors: yes
+      retries: 3
+      delay: 5
+      until: time_report is succeeded
+      timeout: 600
 
     # -------------------------------------------------
     # [10] NETWORK CONFIGURATION (first physical adapter only for CSV)
@@ -374,7 +414,10 @@
         $output -join "`n"
       register: net_report
       ignore_errors: yes
-
+      retries: 3
+      delay: 5
+      until: net_report is succeeded
+      timeout: 600
     # -------------------------------------------------
     # Write final text report (human readable)
     # -------------------------------------------------
@@ -406,7 +449,7 @@
         dest: "/home/csi/Desktop/report.csv"
         content: |
           {% set all_hosts = ansible_play_hosts_all -%}
-          "",{% for h in all_hosts %}"{{ h }}"{% if not loop.last %},{% endif %}{% endfor %}
+          "Host",{% for h in all_hosts %}"{{ h }}"{% if not loop.last %},{% endif %}{% endfor %}
 
           "Generated On",{% for h in all_hosts %}{% set hr = hostvars[h] %}"{{ (hr.system_report.stdout | default('') | regex_findall('Generated on: ([\d/]+) at ([\d:.]+)') | first | join(' at ') | default('N/A')) | trim | replace('"', '') }}"{% if not loop.last %},{% endif %}{% endfor %}
 
