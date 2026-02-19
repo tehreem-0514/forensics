@@ -446,7 +446,7 @@
       delegate_to: localhost
       run_once: true
       copy:
-        dest: "/home/csi/Desktop/report.csv"
+        dest: "/reports/report.csv"
         content: |
           {% set all_hosts = ansible_play_hosts_all -%}
           "Host",{% for h in all_hosts %}"{{ h }}"{% if not loop.last %},{% endif %}{% endfor %}
